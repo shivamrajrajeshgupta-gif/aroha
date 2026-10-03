@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { supabase } from './lib/supabase'
 import './App.css'
 
 const createConversation = () => ({
@@ -8,6 +9,20 @@ const createConversation = () => ({
 })
 
 function App() {
+    useEffect(() => {
+    const testSupabaseConnection = async () => {
+      const { error } = await supabase.auth.getSession()
+
+      if (error) {
+        console.error('Supabase connection failed:', error)
+        return
+      }
+
+      console.log('✅ AROHA connected to Supabase')
+    }
+
+    testSupabaseConnection()
+  }, [])
   const [message, setMessage] = useState('')
 
   const [conversations, setConversations] = useState(() => {
