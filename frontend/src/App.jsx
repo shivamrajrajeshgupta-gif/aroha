@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
 import Auth from './components/Auth'
+import Documents from './components/Documents'
 import './App.css'
 
 const createConversation = () => ({
@@ -51,6 +52,8 @@ function App() {
   const [message, setMessage] = useState('')
 
 const [conversations, setConversations] = useState([])
+const [activeWorkspace, setActiveWorkspace] =
+  useState('conversations')
 const [activeConversationId, setActiveConversationId] =
   useState(null)
   const [loading, setLoading] = useState(false)
@@ -484,41 +487,64 @@ useEffect(() => {
             WORKSPACE
           </p>
 
-          <button className="sidebar-item active">
-            <span>◈</span>
-            Conversations
-          </button>
+          <button
+  className={`sidebar-item ${
+    activeWorkspace === 'conversations'
+      ? 'active'
+      : ''
+  }`}
+  onClick={() => setActiveWorkspace('conversations')}
+>
+  <span>◈</span>
+  Conversations
+</button>
 
-          <button className="sidebar-item">
-            <span>⌕</span>
-            Search
-          </button>
+<button
+  className={`sidebar-item ${
+    activeWorkspace === 'search'
+      ? 'active'
+      : ''
+  }`}
+  onClick={() => setActiveWorkspace('search')}
+>
+  <span>⌕</span>
+  Search
+</button>
 
-          <button className="sidebar-item">
-            <span>▣</span>
-            Documents
-          </button>
+<button
+  className={`sidebar-item ${
+    activeWorkspace === 'documents'
+      ? 'active'
+      : ''
+  }`}
+  onClick={() => setActiveWorkspace('documents')}
+>
+  <span>▣</span>
+  Documents
+</button>
         </div>
 
-        <div className="conversation-list">
-          {conversations.map((conversation) => (
-            <button
-              key={conversation.id}
-              className={`conversation-item ${
-                conversation.id === activeConversationId
-                  ? 'active'
-                  : ''
-              }`}
-              onClick={() =>
-                handleSelectConversation(
-                  conversation.id
-                )
-              }
-            >
-              {conversation.title}
-            </button>
-          ))}
-        </div>
+        {activeWorkspace === 'conversations' && (
+  <div className="conversation-list">
+    {conversations.map((conversation) => (
+      <button
+        key={conversation.id}
+        className={`conversation-item ${
+          conversation.id === activeConversationId
+            ? 'active'
+            : ''
+        }`}
+        onClick={() =>
+          handleSelectConversation(
+            conversation.id
+          )
+        }
+      >
+        {conversation.title}
+      </button>
+    ))}
+  </div>
+)}
 
         <div className="sidebar-bottom">
 
@@ -596,8 +622,11 @@ useEffect(() => {
 
         {/* Welcome */}
 
-        {messages.length === 0 && (
-          <section className="welcome">
+{activeWorkspace === 'conversations' && (
+  <>
+    {/* Welcome */}
+
+    {messages.length === 0 && (          <section className="welcome">
 
             <div className="welcome-icon">
               ✦
@@ -784,11 +813,18 @@ useEffect(() => {
         </form>
 
         <p className="disclaimer">
-          AROHA can make mistakes. Check important
-          information.
-        </p>
+  AROHA can make mistakes. Check important
+  information.
+</p>
 
-      </main>
+  </>
+)}
+
+{activeWorkspace === 'documents' && (
+  <Documents />
+)}
+
+</main>
 
     </div>
   )
