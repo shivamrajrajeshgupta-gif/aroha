@@ -126,21 +126,61 @@ useEffect(() => {
 }, [session])  // --------------------------------------------------
   // Make sure an active conversation exists
   // --------------------------------------------------
-
   useEffect(() => {
-    const activeExists = conversations.some(
-      (conversation) =>
-        conversation.id === activeConversationId
-    )
+  const activeExists = conversations.some(
+    (conversation) =>
+      conversation.id === activeConversationId
+  )
 
-    if (activeExists) {
+  if (activeExists) {
+    return
+  }
+
+  if (conversations.length > 0) {
+    setActiveConversationId(conversations[0].id)
+  }
+}, [conversations, activeConversationId])
+
+useEffect(() => {
+  if (!activeConversationId || !session?.user?.id) {
+    return
+  }
+
+  const loadMessages = async () => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('*')
+      .eq(
+        'conversation_id',
+        activeConversationId
+      )
+      .eq('user_id', session.user.id)
+      .order('created_at', {
+        ascending: true,
+      })
+
+    if (error) {
+      console.error(
+        'Could not load messages:',
+        error
+      )
       return
     }
 
-    if (conversations.length > 0) {
-      setActiveConversationId(conversations[0].id)
-    }
-  }, [conversations, activeConversationId])
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === activeConversationId
+          ? {
+              ...conversation,
+              messages: data || [],
+            }
+          : conversation
+      )
+    )
+  }
+
+  loadMessages()
+}, [activeConversationId, session])
 
   // --------------------------------------------------
   // Auto-scroll
@@ -224,90 +264,167 @@ useEffect(() => {
   // --------------------------------------------------
 
   const handleSubmit = async (event) => {
-    event.preventDefault()
+  event.preventDefault()
 
-    if (
-      !message.trim() ||
-      loading ||
-      !activeConversationId
-    ) {
-      return
+  if (
+    !message.trim() ||
+    loading ||
+    !activeConversationId ||
+    !session?.user?.id
+  ) {
+    return
+  }
+
+  const userMessage = message.trim()
+  const conversationId = activeConversationId
+
+  const currentConversation = conversations.find(
+    (conversation) =>
+      conversation.id === conversationId
+  )
+
+  const isFirstMessage =
+    currentConversation?.messages.length === 0
+
+  const conversationTitle = isFirstMessage
+    ? userMessage.slice(0, 40)
+    : currentConversation?.title || 'New conversation'
+
+  setMessage('')
+  setLoading(true)
+
+  try {
+    // ----------------------------------------------
+    // 1. Update conversation title
+    // ----------------------------------------------
+
+    if (isFirstMessage) {
+      const { error: titleUpdateError } =
+        await supabase
+          .from('conversations')
+          .update({
+            title: conversationTitle,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', conversationId)
+          .eq('user_id', session.user.id)
+
+      if (titleUpdateError) {
+        throw titleUpdateError
+      }
     }
 
-    const userMessage = message.trim()
+    // ----------------------------------------------
+    // 2. Save user message
+    // ----------------------------------------------
 
-    const userMessageObject = {
-      role: 'user',
-      content: userMessage,
+    const {
+      data: savedUserMessage,
+      error: userMessageError,
+    } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        user_id: session.user.id,
+        role: 'user',
+        content: userMessage,
+      })
+      .select()
+      .single()
+
+    if (userMessageError) {
+      throw userMessageError
     }
 
-    const conversationId = activeConversationId
+    // ----------------------------------------------
+    // 3. Update UI with user message
+    // ----------------------------------------------
 
     setConversations((currentConversations) =>
       currentConversations.map((conversation) =>
         conversation.id === conversationId
           ? {
               ...conversation,
-              title:
-                conversation.messages.length === 0
-                  ? userMessage.slice(0, 40)
-                  : conversation.title,
+              title: conversationTitle,
               messages: [
                 ...conversation.messages,
-                userMessageObject,
+                savedUserMessage,
               ],
             }
           : conversation
       )
     )
 
-    setMessage('')
-    setLoading(true)
+    // ----------------------------------------------
+    // 4. Ask backend for AROHA response
+    // ----------------------------------------------
 
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: userMessage,
-        }),
-      })
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: userMessage,
+      }),
+    })
 
-      if (!response.ok) {
-        throw new Error(
-          `HTTP error: ${response.status}`
-        )
-      }
-
-      const data = await response.json()
-
-      addMessageToConversation(
-        conversationId,
-        {
-          role: 'assistant',
-          content: data.message,
-        }
+    if (!response.ok) {
+      throw new Error(
+        `HTTP error: ${response.status}`
       )
-    } catch (error) {
-      console.error(
-        'Could not connect to AROHA backend:',
-        error
-      )
-
-      addMessageToConversation(
-        conversationId,
-        {
-          role: 'assistant',
-          content:
-            'Sorry, something went wrong. Please try again.',
-        }
-      )
-    } finally {
-      setLoading(false)
     }
+
+    const data = await response.json()
+
+    // ----------------------------------------------
+    // 5. Save AROHA response
+    // ----------------------------------------------
+
+    const {
+      data: savedAssistantMessage,
+      error: assistantMessageError,
+    } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: conversationId,
+        user_id: session.user.id,
+        role: 'assistant',
+        content: data.message,
+      })
+      .select()
+      .single()
+
+    if (assistantMessageError) {
+      throw assistantMessageError
+    }
+
+    // ----------------------------------------------
+    // 6. Update UI with AROHA response
+    // ----------------------------------------------
+
+    addMessageToConversation(
+      conversationId,
+      savedAssistantMessage
+    )
+  } catch (error) {
+    console.error(
+      'Could not complete chat request:',
+      error
+    )
+
+    addMessageToConversation(
+      conversationId,
+      {
+        role: 'assistant',
+        content:
+          'Sorry, something went wrong. Please try again.',
+      }
+    )
+  } finally {
+    setLoading(false)
   }
+}
 
   // --------------------------------------------------
   // Quick actions
