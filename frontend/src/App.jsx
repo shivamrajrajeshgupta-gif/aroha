@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
+import Auth from './components/Auth'
 import './App.css'
 
 const createConversation = () => ({
@@ -9,40 +10,49 @@ const createConversation = () => ({
 })
 
 function App() {
-    useEffect(() => {
-    const testSupabaseConnection = async () => {
-      const { error } = await supabase.auth.getSession()
+  // --------------------------------------------------
+  // Authentication
+  // --------------------------------------------------
 
-      if (error) {
-        console.error('Supabase connection failed:', error)
-        return
-      }
+  const [session, setSession] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
 
-      console.log('✅ AROHA connected to Supabase')
+  useEffect(() => {
+    const getSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+
+      setSession(session)
+      setAuthLoading(false)
     }
 
-    testSupabaseConnection()
+    getSession()
   }, [])
+
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setSession(session)
+      }
+    )
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [])
+
+  // --------------------------------------------------
+  // State
+  // --------------------------------------------------
+
   const [message, setMessage] = useState('')
 
-  const [conversations, setConversations] = useState(() => {
-    const saved = localStorage.getItem('aroha_conversations')
-
-    if (saved) {
-      try {
-        return JSON.parse(saved)
-      } catch {
-        return [createConversation()]
-      }
-    }
-
-    return [createConversation()]
-  })
-
-  const [activeConversationId, setActiveConversationId] = useState(() => {
-    return localStorage.getItem('aroha_active_conversation')
-  })
-
+const [conversations, setConversations] = useState([])
+const [activeConversationId, setActiveConversationId] =
+  useState(null)
   const [loading, setLoading] = useState(false)
 
   const [theme, setTheme] = useState(() => {
@@ -52,7 +62,8 @@ function App() {
   const messagesEndRef = useRef(null)
 
   const activeConversation = conversations.find(
-    (conversation) => conversation.id === activeConversationId
+    (conversation) =>
+      conversation.id === activeConversationId
   )
 
   const messages = activeConversation?.messages || []
@@ -62,34 +73,64 @@ function App() {
   // --------------------------------------------------
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
+    document.documentElement.setAttribute(
+      'data-theme',
+      theme
+    )
+
     localStorage.setItem('aroha_theme', theme)
   }, [theme])
 
   // --------------------------------------------------
-  // Conversation persistence
+  // Local conversation persistence
+  // --------------------------------------------------
+useEffect(() => {
+  if (!session?.user?.id) {
+    return
+  }
+
+  const loadConversations = async () => {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('updated_at', {
+        ascending: false,
+      })
+
+    if (error) {
+      console.error(
+        'Could not load conversations:',
+        error
+      )
+      return
+    }
+
+    const loadedConversations = (data || []).map(
+      (conversation) => ({
+        ...conversation,
+        messages: [],
+      })
+    )
+
+    setConversations(loadedConversations)
+
+    if (loadedConversations.length > 0) {
+      setActiveConversationId(
+        loadedConversations[0].id
+      )
+    }
+  }
+
+  loadConversations()
+}, [session])  // --------------------------------------------------
+  // Make sure an active conversation exists
   // --------------------------------------------------
 
   useEffect(() => {
-    localStorage.setItem(
-      'aroha_conversations',
-      JSON.stringify(conversations)
-    )
-  }, [conversations])
-
-  useEffect(() => {
-    if (activeConversationId) {
-      localStorage.setItem(
-        'aroha_active_conversation',
-        activeConversationId
-      )
-    }
-  }, [activeConversationId])
-
-  // Make sure an active conversation always exists.
-  useEffect(() => {
     const activeExists = conversations.some(
-      (conversation) => conversation.id === activeConversationId
+      (conversation) =>
+        conversation.id === activeConversationId
     )
 
     if (activeExists) {
@@ -115,28 +156,54 @@ function App() {
   // Conversation actions
   // --------------------------------------------------
 
-  const handleNewConversation = () => {
-    const newConversation = createConversation()
-
-    setConversations((current) => [
-      newConversation,
-      ...current,
-    ])
-
-    setActiveConversationId(newConversation.id)
-    setMessage('')
+  const handleNewConversation = async () => {
+  if (!session?.user?.id) {
+    return
   }
 
+  const { data, error } = await supabase
+    .from('conversations')
+    .insert({
+      user_id: session.user.id,
+      title: 'New conversation',
+    })
+    .select()
+    .single()
+
+  if (error) {
+    console.error(
+      'Could not create conversation:',
+      error
+    )
+    return
+  }
+
+  const newConversation = {
+    ...data,
+    messages: [],
+  }
+
+  setConversations((current) => [
+    newConversation,
+    ...current,
+  ])
+
+  setActiveConversationId(newConversation.id)
+  setMessage('')
+}
   const handleSelectConversation = (conversationId) => {
     setActiveConversationId(conversationId)
     setMessage('')
   }
 
   // --------------------------------------------------
-  // Chat
+  // Chat helpers
   // --------------------------------------------------
 
-  const addMessageToConversation = (conversationId, newMessage) => {
+  const addMessageToConversation = (
+    conversationId,
+    newMessage
+  ) => {
     setConversations((currentConversations) =>
       currentConversations.map((conversation) =>
         conversation.id === conversationId
@@ -152,10 +219,18 @@ function App() {
     )
   }
 
+  // --------------------------------------------------
+  // Chat submit
+  // --------------------------------------------------
+
   const handleSubmit = async (event) => {
     event.preventDefault()
 
-    if (!message.trim() || loading || !activeConversationId) {
+    if (
+      !message.trim() ||
+      loading ||
+      !activeConversationId
+    ) {
       return
     }
 
@@ -166,10 +241,11 @@ function App() {
       content: userMessage,
     }
 
-    // Add user's message immediately.
+    const conversationId = activeConversationId
+
     setConversations((currentConversations) =>
       currentConversations.map((conversation) =>
-        conversation.id === activeConversationId
+        conversation.id === conversationId
           ? {
               ...conversation,
               title:
@@ -200,13 +276,15 @@ function App() {
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP error: ${response.status}`)
+        throw new Error(
+          `HTTP error: ${response.status}`
+        )
       }
 
       const data = await response.json()
 
       addMessageToConversation(
-        activeConversationId,
+        conversationId,
         {
           role: 'assistant',
           content: data.message,
@@ -219,7 +297,7 @@ function App() {
       )
 
       addMessageToConversation(
-        activeConversationId,
+        conversationId,
         {
           role: 'assistant',
           content:
@@ -239,10 +317,38 @@ function App() {
     setMessage(prompt)
   }
 
+  // --------------------------------------------------
+  // Authentication loading
+  // --------------------------------------------------
+
+  if (authLoading) {
+    return (
+      <div className="auth-loading">
+        <div className="auth-loading-mark">✦</div>
+        <p>Loading AROHA...</p>
+      </div>
+    )
+  }
+
+  // --------------------------------------------------
+  // Authentication screen
+  // --------------------------------------------------
+
+  if (!session) {
+    return <Auth />
+  }
+
+  // --------------------------------------------------
+  // Main application
+  // --------------------------------------------------
+
   return (
     <div className="app">
+
       {/* Sidebar */}
+
       <aside className="sidebar">
+
         <div className="brand">
           <div className="brand-mark">✦</div>
           <span>AROHA</span>
@@ -257,7 +363,9 @@ function App() {
         </button>
 
         <div className="sidebar-section">
-          <p className="section-title">WORKSPACE</p>
+          <p className="section-title">
+            WORKSPACE
+          </p>
 
           <button className="sidebar-item active">
             <span>◈</span>
@@ -285,7 +393,9 @@ function App() {
                   : ''
               }`}
               onClick={() =>
-                handleSelectConversation(conversation.id)
+                handleSelectConversation(
+                  conversation.id
+                )
               }
             >
               {conversation.title}
@@ -294,30 +404,54 @@ function App() {
         </div>
 
         <div className="sidebar-bottom">
+
           <button className="sidebar-item">
             <span>⚙</span>
             Settings
           </button>
 
           <div className="profile">
-            <div className="avatar">S</div>
+            <div className="avatar">
+              {(
+                session?.user?.email?.[0] || 'A'
+              ).toUpperCase()}
+            </div>
 
-            <div>
-              <strong>Guest</strong>
-              <small>Personal workspace</small>
+            <div className="profile-info">
+              <strong>
+                {session?.user?.email || 'User'}
+              </strong>
+
+              <small>Signed in</small>
             </div>
           </div>
+
+          <button
+            className="sign-out-button"
+            onClick={async () => {
+              await supabase.auth.signOut()
+            }}
+          >
+            <span>↪</span>
+            Sign out
+          </button>
+
         </div>
+
       </aside>
 
       {/* Main */}
+
       <main className="main">
+
         <header className="topbar">
+
           <div className="mobile-brand">
             ✦ AROHA
           </div>
 
           <div className="topbar-actions">
+
             <button
               className="icon-button"
               aria-label="Toggle theme"
@@ -338,13 +472,19 @@ function App() {
             >
               ⚙
             </button>
+
           </div>
+
         </header>
 
         {/* Welcome */}
+
         {messages.length === 0 && (
           <section className="welcome">
-            <div className="welcome-icon">✦</div>
+
+            <div className="welcome-icon">
+              ✦
+            </div>
 
             <p className="eyebrow">
               YOUR PERSONAL AI WORKSPACE
@@ -362,6 +502,7 @@ function App() {
             </p>
 
             <div className="quick-actions">
+
               <button
                 onClick={() =>
                   handleQuickAction(
@@ -372,7 +513,10 @@ function App() {
                 <span>✦</span>
 
                 <div>
-                  <strong>Learn something</strong>
+                  <strong>
+                    Learn something
+                  </strong>
+
                   <small>
                     Understand a topic or concept
                   </small>
@@ -389,7 +533,10 @@ function App() {
                 <span>⌘</span>
 
                 <div>
-                  <strong>Build something</strong>
+                  <strong>
+                    Build something
+                  </strong>
+
                   <small>
                     Code, plan, or create
                   </small>
@@ -406,19 +553,26 @@ function App() {
                 <span>◈</span>
 
                 <div>
-                  <strong>Explore an idea</strong>
+                  <strong>
+                    Explore an idea
+                  </strong>
+
                   <small>
                     Brainstorm and discover
                   </small>
                 </div>
               </button>
+
             </div>
+
           </section>
         )}
 
         {/* Chat history */}
+
         {messages.length > 0 && (
           <div className="chat-history">
+
             {messages.map((item, index) => (
               <div
                 key={index}
@@ -436,6 +590,7 @@ function App() {
 
             {loading && (
               <div className="chat-message assistant">
+
                 <div className="message-label">
                   AROHA
                 </div>
@@ -445,18 +600,22 @@ function App() {
                   <span />
                   <span />
                 </p>
+
               </div>
             )}
 
             <div ref={messagesEndRef} />
+
           </div>
         )}
 
         {/* Composer */}
+
         <form
           className="chat-box"
           onSubmit={handleSubmit}
         >
+
           <textarea
             value={message}
             onChange={(event) =>
@@ -476,7 +635,9 @@ function App() {
           />
 
           <div className="input-footer">
+
             <div className="input-tools">
+
               <button
                 type="button"
                 aria-label="Attach file"
@@ -487,6 +648,7 @@ function App() {
               <span>
                 Shift + Enter for a new line
               </span>
+
             </div>
 
             <button
@@ -499,14 +661,18 @@ function App() {
             >
               ↑
             </button>
+
           </div>
+
         </form>
 
         <p className="disclaimer">
           AROHA can make mistakes. Check important
           information.
         </p>
+
       </main>
+
     </div>
   )
 }
