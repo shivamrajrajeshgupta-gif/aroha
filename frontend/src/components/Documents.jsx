@@ -8,6 +8,8 @@ function Documents() {
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
+  const [readingDocumentId, setReadingDocumentId] =
+  useState(null)
 
   const loadDocuments = async () => {
     setLoading(true)
@@ -121,7 +123,65 @@ function Documents() {
       setUploading(false)
     }
   }
+const handleRead = async (document) => {
+  setReadingDocumentId(document.id)
+  setError('')
 
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) {
+      throw new Error(
+        'You must be signed in to read documents.'
+      )
+    }
+
+    const response = await fetch(
+      `/api/documents/${document.id}/extract`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      }
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail ||
+          data.error ||
+          'Could not read the document.'
+      )
+    }
+
+    console.log(
+      'Extracted document:',
+      data
+    )
+
+    alert(
+      data.text ||
+        data.error ||
+        'No text could be extracted.'
+    )
+  } catch (readError) {
+    console.error(
+      'Could not read document:',
+      readError
+    )
+
+    setError(
+      readError.message ||
+        'Something went wrong while reading the document.'
+    )
+  } finally {
+    setReadingDocumentId(null)
+  }
+}
   const handleDelete = async (document) => {
     const confirmed = window.confirm(
       `Delete "${document.name}"?`
@@ -273,14 +333,29 @@ function Documents() {
                 </p>
               </div>
 
-              <button
-                className="document-delete-button"
-                type="button"
-                onClick={() => handleDelete(document)}
-                title="Delete document"
-              >
-                🗑️
-              </button>
+              <div className="document-card-actions">
+  <button
+    className="document-read-button"
+    type="button"
+    onClick={() => handleRead(document)}
+    disabled={
+      readingDocumentId === document.id
+    }
+  >
+    {readingDocumentId === document.id
+      ? 'Reading...'
+      : 'Read'}
+  </button>
+
+  <button
+    className="document-delete-button"
+    type="button"
+    onClick={() => handleDelete(document)}
+    title="Delete document"
+  >
+    🗑️
+  </button>
+</div>              
             </article>
           ))}
         </div>
