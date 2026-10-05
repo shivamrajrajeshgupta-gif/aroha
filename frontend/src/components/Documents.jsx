@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 
 function Documents() {
   const fileInputRef = useRef(null)
-
+  const [processingDocumentId, setProcessingDocumentId] =
+    useState(null)
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -206,7 +207,83 @@ function Documents() {
       setReadingDocumentId(null)
     }
   }
+  const handleProcess = async (document) => {
+  setProcessingDocumentId(document.id)
+  setError('')
 
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+
+    if (!session) {
+      throw new Error(
+        'You must be signed in to process documents.'
+      )
+    }
+
+    const response = await fetch(
+      `/api/documents/${document.id}/process`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      }
+    )
+
+    const responseText = await response.text()
+
+    let data = null
+
+    try {
+      data = responseText
+        ? JSON.parse(responseText)
+        : null
+    } catch {
+      throw new Error(
+        'The server returned an invalid response.'
+      )
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data?.detail ||
+          data?.error ||
+          'Could not process the document.'
+      )
+    }
+
+    if (!data) {
+      throw new Error(
+        'The server returned an empty response.'
+      )
+    }
+
+    console.log(
+      'Document processed:',
+      data
+    )
+
+    alert(
+      `${data.filename} processed successfully.\n\n` +
+      `Chunks created: ${data.chunks_created}\n` +
+      `Characters: ${data.characters}`
+    )
+  } catch (processError) {
+    console.error(
+      'Could not process document:',
+      processError
+    )
+
+    setError(
+      processError.message ||
+        'Something went wrong while processing the document.'
+    )
+  } finally {
+    setProcessingDocumentId(null)
+  }
+}
   const handleDelete = async (document) => {
     const confirmed = window.confirm(
       `Delete "${document.name}"?`
@@ -449,21 +526,37 @@ function Documents() {
                 </p>
               </div>
 
-              <button
-                className="document-read-button"
-                type="button"
-                onClick={() =>
-                  handleRead(document)
-                }
-                disabled={
-                  readingDocumentId ===
-                  document.id
-                }
-              >
-                {readingDocumentId === document.id
-                  ? 'Reading...'
-                  : 'Read document'}
-              </button>
+              <div className="document-card-actions">
+  <button
+    className="document-process-button"
+    type="button"
+    onClick={() =>
+      handleProcess(document)
+    }
+    disabled={
+      processingDocumentId === document.id
+    }
+  >
+    {processingDocumentId === document.id
+      ? 'Processing...'
+      : 'Process'}
+  </button>
+
+  <button
+    className="document-read-button"
+    type="button"
+    onClick={() =>
+      handleRead(document)
+    }
+    disabled={
+      readingDocumentId === document.id
+    }
+  >
+    {readingDocumentId === document.id
+      ? 'Reading...'
+      : 'Read document'}
+  </button>
+</div>
             </article>
           ))}
         </div>

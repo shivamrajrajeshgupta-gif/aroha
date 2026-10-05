@@ -11,6 +11,10 @@ from supabase import create_client
 from pypdf import PdfReader
 from docx import Document
 from sentence_transformers import SentenceTransformer
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+)
 import asyncio
 import os
 import io
@@ -29,6 +33,18 @@ supabase = create_client(
 )
 embedding_model = SentenceTransformer(
     "sentence-transformers/all-MiniLM-L6-v2"
+)
+embedding_model = SentenceTransformer(
+    "sentence-transformers/all-MiniLM-L6-v2"
+)
+generation_model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+
+generation_tokenizer = AutoTokenizer.from_pretrained(
+    generation_model_name
+)
+
+generation_model = AutoModelForCausalLM.from_pretrained(
+    generation_model_name
 )
 
 app = FastAPI(
@@ -341,9 +357,223 @@ def generate_embedding(text: str):
         text,
         normalize_embeddings=True,
     )
-
+    
     return embedding.tolist()
 
+def generate_answer(
+    query: str,
+    context: str,
+):
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are AROHA, a personal AI assistant. "
+                "Answer the user's question using only the "
+                "provided document context. "
+                "Do not use outside knowledge. "
+                "Do not invent facts. "
+                "If the answer is not in the context, say "
+                "\"I don't have enough information in the "
+                "uploaded documents.\""
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Document context:\n{context}\n\n"
+                f"Question: {query}\n\n"
+                "Give a short, direct answer."
+            ),
+        },
+    ]
+
+    prompt = generation_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+    inputs = generation_tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=1024,
+    )
+
+    output = generation_model.generate(
+        **inputs,
+        max_new_tokens=150,
+        do_sample=False,
+    )
+
+    generated_tokens = output[
+        0
+    ][inputs.input_ids.shape[1]:]
+
+    answer = generation_tokenizer.decode(
+        generated_tokens,
+        skip_special_tokens=True,
+    )
+
+    return answer.strip()
+
+
+def search_similar_chunks(
+    query: str,
+    user_id: str,
+    match_count: int = 5,
+):
+    query_embedding = generate_embedding(query)
+
+    response = (
+        supabase
+        .rpc(
+            "match_document_chunks",
+            {
+                "query_embedding": query_embedding,
+                "match_user_id": user_id,
+                "match_count": match_count,
+            },
+        )
+        .execute()
+    )
+
+    return response.data
+
+@app.post("/search")
+async def search_documents(
+    query: str,
+    authorization: str | None = Header(default=None),
+):
+    access_token = get_bearer_token(
+        authorization
+    )
+
+    try:
+        user_response = supabase.auth.get_user(
+            access_token
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
+
+    user = user_response.user
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Could not identify the user.",
+        )
+
+    try:
+        results = search_similar_chunks(
+            query=query,
+            user_id=user.id,
+            match_count=5,
+        )
+    except Exception as search_error:
+        print(
+            "Vector search failed:",
+            search_error,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Could not search document chunks.",
+        )
+
+    return {
+        "query": query,
+        "results": results,
+    }    
+
+@app.post("/rag")
+async def rag_answer(
+    query: str,
+    authorization: str | None = Header(default=None),
+):
+    access_token = get_bearer_token(
+        authorization
+    )
+
+    try:
+        user_response = supabase.auth.get_user(
+            access_token
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
+
+    user = user_response.user
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Could not identify the user.",
+        )
+
+    try:
+        chunks = search_similar_chunks(
+            query=query,
+            user_id=user.id,
+            match_count=3,
+        )
+    except Exception as search_error:
+        print(
+            "RAG search failed:",
+            search_error,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Could not retrieve document context.",
+        )
+
+    if not chunks:
+        return {
+            "query": query,
+            "answer": "I couldn't find relevant information in your documents.",
+            "sources": [],
+        }
+
+    context = "\n\n".join(
+        [
+            f"[Document chunk {index + 1}]\n{chunk['content']}"
+            for index, chunk in enumerate(chunks)
+        ]
+    )
+
+    prompt = f"""
+You are AROHA, a context-aware personal AI workspace.
+
+Answer the user's question using ONLY the document context provided below.
+
+If the answer cannot be found in the provided context, say that the information is not available in the uploaded documents.
+
+Do not invent facts.
+
+Document context:
+{context}
+
+User question:
+{query}
+"""
+
+    # Temporary placeholder.
+    # We will connect the AI generation here next.
+    answer = generate_answer(
+    query=query,
+    context=context,
+)
+
+    return {
+        "query": query,
+        "answer": answer,
+    "sources": chunks,
+}
 
 @app.post("/documents/{document_id}/process")
 async def process_document(
