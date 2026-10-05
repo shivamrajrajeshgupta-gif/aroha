@@ -7,9 +7,9 @@ function Documents() {
   const [documents, setDocuments] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState('')
   const [readingDocumentId, setReadingDocumentId] =
-  useState(null)
+    useState(null)
+  const [error, setError] = useState('')
 
   const loadDocuments = async () => {
     setLoading(true)
@@ -25,13 +25,14 @@ function Documents() {
       return
     }
 
-    const { data, error: documentsError } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', {
-        ascending: false,
-      })
+    const { data, error: documentsError } =
+      await supabase
+        .from('documents')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', {
+          ascending: false,
+        })
 
     if (documentsError) {
       console.error(
@@ -67,7 +68,9 @@ function Documents() {
       } = await supabase.auth.getUser()
 
       if (!user) {
-        throw new Error('You must be signed in to upload documents.')
+        throw new Error(
+          'You must be signed in to upload documents.'
+        )
       }
 
       const fileId = crypto.randomUUID()
@@ -75,28 +78,27 @@ function Documents() {
       const storagePath =
         `${user.id}/${fileId}-${file.name}`
 
-      // 1. Upload the actual file to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(storagePath, file)
+      const { error: uploadError } =
+        await supabase.storage
+          .from('documents')
+          .upload(storagePath, file)
 
       if (uploadError) {
         throw uploadError
       }
 
-      // 2. Save the file metadata in the documents table
-      const { error: databaseError } = await supabase
-        .from('documents')
-        .insert({
-          user_id: user.id,
-          name: file.name,
-          storage_path: storagePath,
-          mime_type: file.type || null,
-          size_bytes: file.size,
-        })
+      const { error: databaseError } =
+        await supabase
+          .from('documents')
+          .insert({
+            user_id: user.id,
+            name: file.name,
+            storage_path: storagePath,
+            mime_type: file.type || null,
+            size_bytes: file.size,
+          })
 
       if (databaseError) {
-        // If database insertion fails, remove the uploaded file
         await supabase.storage
           .from('documents')
           .remove([storagePath])
@@ -104,10 +106,7 @@ function Documents() {
         throw databaseError
       }
 
-      // 3. Refresh the document list
       await loadDocuments()
-
-      // Reset the file input so the same file can be selected again
       event.target.value = ''
     } catch (uploadError) {
       console.error(
@@ -123,65 +122,91 @@ function Documents() {
       setUploading(false)
     }
   }
-const handleRead = async (document) => {
-  setReadingDocumentId(document.id)
-  setError('')
 
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
+  const handleRead = async (document) => {
+    setReadingDocumentId(document.id)
+    setError('')
 
-    if (!session) {
-      throw new Error(
-        'You must be signed in to read documents.'
-      )
-    }
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
 
-    const response = await fetch(
-      `/api/documents/${document.id}/extract`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
+      if (!session) {
+        throw new Error(
+          'You must be signed in to read documents.'
+        )
       }
-    )
 
-    const data = await response.json()
-
-    if (!response.ok) {
-      throw new Error(
-        data.detail ||
-          data.error ||
-          'Could not read the document.'
+      const response = await fetch(
+        `/api/documents/${document.id}/extract`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        }
       )
+
+      const responseText = await response.text()
+
+      let data = null
+
+      try {
+        data = responseText
+          ? JSON.parse(responseText)
+          : null
+      } catch {
+        throw new Error(
+          'The server returned an invalid response.'
+        )
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data?.detail ||
+            data?.error ||
+            'Could not read the document.'
+        )
+      }
+
+      if (!data) {
+        throw new Error(
+          'The server returned an empty response.'
+        )
+      }
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      if (!data.text) {
+        throw new Error(
+          'The document was read, but no text was extracted.'
+        )
+      }
+
+      console.log(
+        'Extracted document:',
+        data
+      )
+
+      alert(data.text)
+    } catch (readError) {
+      console.error(
+        'Could not read document:',
+        readError
+      )
+
+      setError(
+        readError.message ||
+          'Something went wrong while reading the document.'
+      )
+    } finally {
+      setReadingDocumentId(null)
     }
-
-    console.log(
-      'Extracted document:',
-      data
-    )
-
-    alert(
-      data.text ||
-        data.error ||
-        'No text could be extracted.'
-    )
-  } catch (readError) {
-    console.error(
-      'Could not read document:',
-      readError
-    )
-
-    setError(
-      readError.message ||
-        'Something went wrong while reading the document.'
-    )
-  } finally {
-    setReadingDocumentId(null)
   }
-}
+
   const handleDelete = async (document) => {
     const confirmed = window.confirm(
       `Delete "${document.name}"?`
@@ -194,26 +219,25 @@ const handleRead = async (document) => {
     setError('')
 
     try {
-      // 1. Delete the actual file from Storage
-      const { error: storageError } = await supabase.storage
-        .from('documents')
-        .remove([document.storage_path])
+      const { error: storageError } =
+        await supabase.storage
+          .from('documents')
+          .remove([document.storage_path])
 
       if (storageError) {
         throw storageError
       }
 
-      // 2. Delete its metadata from the database
-      const { error: databaseError } = await supabase
-        .from('documents')
-        .delete()
-        .eq('id', document.id)
+      const { error: databaseError } =
+        await supabase
+          .from('documents')
+          .delete()
+          .eq('id', document.id)
 
       if (databaseError) {
         throw databaseError
       }
 
-      // 3. Update the UI
       setDocuments((currentDocuments) =>
         currentDocuments.filter(
           (item) => item.id !== document.id
@@ -248,24 +272,76 @@ const handleRead = async (document) => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  const getFileType = (document) => {
+    const mimeType = document.mime_type || ''
+
+    if (mimeType === 'application/pdf') {
+      return 'PDF'
+    }
+
+    if (
+      mimeType ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ) {
+      return 'DOCX'
+    }
+
+    if (mimeType === 'text/plain') {
+      return 'TXT'
+    }
+
+    return 'FILE'
+  }
+
+  const getFileIcon = (document) => {
+    const type = getFileType(document)
+
+    if (type === 'PDF') {
+      return 'PDF'
+    }
+
+    if (type === 'DOCX') {
+      return 'DOC'
+    }
+
+    if (type === 'TXT') {
+      return 'TXT'
+    }
+
+    return 'FILE'
+  }
+
   return (
     <section className="documents-workspace">
-      <div className="documents-header">
+      <div className="documents-page-header">
         <div>
+          <span className="documents-eyebrow">
+            KNOWLEDGE SPACE
+          </span>
+
           <h1>Documents</h1>
+
           <p>
-            Upload files and keep them available to AROHA
-            for future context.
+            Keep your files available to AROHA for
+            future context.
           </p>
         </div>
 
         <button
           className="documents-upload-button"
           type="button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() =>
+            fileInputRef.current?.click()
+          }
           disabled={uploading}
         >
-          {uploading ? 'Uploading...' : 'Upload document'}
+          <span className="upload-button-icon">
+            +
+          </span>
+
+          {uploading
+            ? 'Uploading...'
+            : 'Upload document'}
         </button>
 
         <input
@@ -282,6 +358,20 @@ const handleRead = async (document) => {
         </div>
       )}
 
+      <div className="documents-summary">
+        <div>
+          <strong>
+            {documents.length}
+          </strong>
+
+          <span>
+            {documents.length === 1
+              ? ' document'
+              : ' documents'}
+          </span>
+        </div>
+      </div>
+
       {loading ? (
         <div className="documents-empty-state">
           <p>Loading documents...</p>
@@ -289,20 +379,23 @@ const handleRead = async (document) => {
       ) : documents.length === 0 ? (
         <div className="documents-empty-state">
           <div className="documents-empty-icon">
-            📄
+            +
           </div>
 
           <h2>No documents yet</h2>
 
           <p>
-            Upload a PDF, DOCX, TXT, or another file to
-            start building your AROHA knowledge space.
+            Upload a PDF, DOCX, TXT, or another file
+            to start building your AROHA knowledge
+            space.
           </p>
 
           <button
             className="documents-secondary-button"
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() =>
+              fileInputRef.current?.click()
+            }
             disabled={uploading}
           >
             Upload your first document
@@ -315,17 +408,40 @@ const handleRead = async (document) => {
               className="document-card"
               key={document.id}
             >
-              <div className="document-card-icon">
-                📄
+              <div className="document-card-top">
+                <div
+                  className={`document-file-icon ${getFileType(
+                    document
+                  ).toLowerCase()}`}
+                >
+                  {getFileIcon(document)}
+                </div>
+
+                <button
+                  className="document-delete-button"
+                  type="button"
+                  onClick={() =>
+                    handleDelete(document)
+                  }
+                  title="Delete document"
+                >
+                  ×
+                </button>
               </div>
 
               <div className="document-card-content">
+                <span className="document-type">
+                  {getFileType(document)}
+                </span>
+
                 <h3 title={document.name}>
                   {document.name}
                 </h3>
 
                 <p>
-                  {formatFileSize(document.size_bytes)}
+                  {formatFileSize(
+                    document.size_bytes
+                  )}
                   {' · '}
                   {new Date(
                     document.created_at
@@ -333,29 +449,21 @@ const handleRead = async (document) => {
                 </p>
               </div>
 
-              <div className="document-card-actions">
-  <button
-    className="document-read-button"
-    type="button"
-    onClick={() => handleRead(document)}
-    disabled={
-      readingDocumentId === document.id
-    }
-  >
-    {readingDocumentId === document.id
-      ? 'Reading...'
-      : 'Read'}
-  </button>
-
-  <button
-    className="document-delete-button"
-    type="button"
-    onClick={() => handleDelete(document)}
-    title="Delete document"
-  >
-    🗑️
-  </button>
-</div>              
+              <button
+                className="document-read-button"
+                type="button"
+                onClick={() =>
+                  handleRead(document)
+                }
+                disabled={
+                  readingDocumentId ===
+                  document.id
+                }
+              >
+                {readingDocumentId === document.id
+                  ? 'Reading...'
+                  : 'Read document'}
+              </button>
             </article>
           ))}
         </div>

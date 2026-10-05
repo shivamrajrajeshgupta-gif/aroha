@@ -1,10 +1,18 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    Header,
+    HTTPException,
+)
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from supabase import create_client
-from fastapi import Header, HTTPException
+from pypdf import PdfReader
+from docx import Document
 import asyncio
 import os
+import io
 
 load_dotenv()
 
@@ -98,6 +106,47 @@ def get_bearer_token(
         1
     )[1]
 
+def extract_document_text(
+    file_content: bytes,
+    mime_type: str | None,
+):
+    if mime_type == "text/plain":
+        return file_content.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+    if mime_type == "application/pdf":
+        pdf_file = io.BytesIO(file_content)
+        reader = PdfReader(pdf_file)
+
+        pages = []
+
+        for page in reader.pages:
+            page_text = page.extract_text() or ""
+            pages.append(page_text)
+
+        return "\n\n".join(pages)
+
+    if mime_type == (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ):
+        docx_file = io.BytesIO(file_content)
+        document = Document(docx_file)
+
+        paragraphs = []
+
+        for paragraph in document.paragraphs:
+            if paragraph.text.strip():
+                paragraphs.append(
+                    paragraph.text
+                )
+
+        return "\n\n".join(paragraphs)
+
+    raise ValueError(
+        "Unsupported document type."
+    )
 
 @app.post("/documents/{document_id}/extract")
 async def extract_stored_document(
@@ -165,22 +214,29 @@ async def extract_stored_document(
         )
 
     # TXT extraction for now
-    if document["mime_type"] != "text/plain":
+    try:
+        text = extract_document_text(
+            file_content,
+            document["mime_type"],
+        )
+    except ValueError as extraction_error:
         return {
             "filename": document["name"],
-            "error": (
-                "For now, only TXT files "
-                "are supported."
-            ),
+            "error": str(extraction_error),
         }
+    except Exception as extraction_error:
+        print(
+            "Document extraction failed:",
+            extraction_error,
+        )
 
-    text = file_content.decode(
-        "utf-8",
-        errors="replace",
-    )
+        raise HTTPException(
+            status_code=500,
+            detail="Could not extract text from the document.",
+        )
 
     return {
-        "id": document["id"],
+         "id": document["id"],
         "filename": document["name"],
         "content_type": document["mime_type"],
         "text": text,

@@ -52,9 +52,17 @@ function App() {
   const [message, setMessage] = useState('')
 
 const [conversations, setConversations] = useState([])
-const [activeWorkspace, setActiveWorkspace] =
-  useState('conversations')
-const [activeConversationId, setActiveConversationId] =
+const [activeWorkspace, setActiveWorkspace] = useState(
+  () => localStorage.getItem('aroha_active_workspace') || 'conversations'
+)
+
+  useEffect(() => {
+  localStorage.setItem(
+    'aroha_active_workspace',
+    activeWorkspace
+  )
+}, [activeWorkspace])
+  const [activeConversationId, setActiveConversationId] =
   useState(null)
   const [loading, setLoading] = useState(false)
 
