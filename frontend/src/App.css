@@ -1801,3 +1801,203 @@ textarea:focus-visible {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* =========================================
+   AROHA 2.0 — Conversation Management
+   ========================================= */
+
+.conversation-search {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-surface);
+  color: var(--text-primary);
+
+  font-size: 12px;
+  outline: none;
+}
+
+.conversation-search:focus {
+  border-color: var(--accent);
+}
+
+.conversation-search::placeholder {
+  color: var(--text-muted);
+}
+
+.conversation-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 4px;
+  border-radius: 10px;
+}
+
+.conversation-row:hover,
+.conversation-row.active {
+  background: var(--bg-surface-hover);
+}
+
+.conversation-row .conversation-item {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+.conversation-row.active .conversation-item {
+  color: var(--text-primary);
+}
+
+.conversation-action {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+
+  border: 0;
+  border-radius: 7px;
+
+  background: transparent;
+  color: var(--text-muted);
+
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.conversation-row:hover .conversation-action,
+.conversation-row.active .conversation-action {
+  opacity: 1;
+}
+
+.conversation-action:hover {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.conversation-rename-form {
+  display: flex;
+  width: 100%;
+  gap: 4px;
+  padding: 5px;
+}
+
+.conversation-rename-form input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+
+  border: 1px solid var(--accent-border);
+  border-radius: 6px;
+
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.conversation-rename-form button {
+  border: 0;
+  border-radius: 6px;
+  padding: 4px 7px;
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.conversation-empty {
+  padding: 12px 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.copy-message-button {
+  display: block;
+  margin-top: 10px;
+  padding: 5px 9px;
+
+  border: 1px solid var(--border);
+  border-radius: 7px;
+
+  background: transparent;
+  color: var(--text-secondary);
+
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.copy-message-button:hover {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.conversation-delete:hover {
+  background: rgba(255, 107, 122, 0.12);
+  color: var(--danger);
+}
+
+.conversation-action {
+  opacity: 0;
+}
+
+.conversation-row:hover .conversation-action,
+.conversation-row.active .conversation-action {
+  opacity: 1;
+}
+
+
+.message-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.message-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.message-edit-form textarea {
+  width: 100%;
+  min-height: 85px;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-primary);
+  font: inherit;
+  outline: none;
+}
+
+.message-edit-form textarea:focus {
+  border-color: var(--accent-bright);
+}
+
+.edit-message-button {
+  padding: 7px 12px;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.edit-message-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.message-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
