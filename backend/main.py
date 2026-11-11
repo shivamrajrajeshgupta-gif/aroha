@@ -53,6 +53,52 @@ app = FastAPI(
     version="0.1.0",
 )
 
+def generate_general_chat_answer(query: str):
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are AROHA, a helpful personal AI assistant. "
+                "Answer clearly, naturally, and accurately. "
+                "If you are unsure, say so. "
+                "Keep answers concise unless more detail is requested."
+            ),
+        },
+        {
+            "role": "user",
+            "content": query,
+        },
+    ]
+
+    prompt = generation_tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+    inputs = generation_tokenizer(
+        prompt,
+        return_tensors="pt",
+        truncation=True,
+        max_length=1024,
+    )
+
+    output = generation_model.generate(
+        **inputs,
+        max_new_tokens=200,
+        do_sample=False,
+    )
+
+    generated_tokens = output[
+        0
+    ][inputs.input_ids.shape[1]:]
+
+    answer = generation_tokenizer.decode(
+        generated_tokens,
+        skip_special_tokens=True,
+    )
+
+    return answer.strip()
 
 class ChatRequest(BaseModel):
     message: str
@@ -75,16 +121,108 @@ async def health_check():
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest):
-    await asyncio.sleep(1.2)
+async def chat(
+    request: ChatRequest,
+    authorization: str | None = Header(default=None),
+):
+    access_token = get_bearer_token(authorization)
+
+    try:
+        user_response = supabase.auth.get_user(
+            access_token
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
+
+    user = user_response.user
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Could not identify the user.",
+        )
+
+    query = request.message.strip()
+
+    
+    if query.lower().strip("!.,? ") in {
+        "hi",
+        "hello",
+        "hey",
+        "hey aroha",
+        "hello aroha",
+        "good morning",
+        "good afternoon",
+        "good evening",
+    }:
+        return {
+            "message": "Hello! How can I assist you today?",
+            "sources": [],
+            "used_documents": False,
+        }
+
+
+    if not query:
+        raise HTTPException(
+            status_code=400,
+            detail="Message cannot be empty.",
+        )
+
+    try:
+        chunks = search_similar_chunks(
+            query=query,
+            user_id=user.id,
+            match_count=3,
+        )
+    except Exception as search_error:
+        print("Chat document search failed:", search_error)
+        raise HTTPException(
+            status_code=500,
+            detail="Could not search your documents.",
+        )
+
+    relevant_chunks = [
+        chunk
+        for chunk in chunks
+        if float(chunk.get("similarity", 0)) >= 0.35
+    ]
+
+    if relevant_chunks:
+        context = "\n\n".join(
+            chunk["content"]
+            for chunk in relevant_chunks
+        )
+
+        answer = generate_answer(
+            query=query,
+            context=context,
+        )
+
+        sources = [
+            {
+                "document_id": chunk.get("document_id"),
+                "chunk_index": chunk.get("chunk_index"),
+                "content": chunk.get("content"),
+                "similarity": chunk.get("similarity"),
+            }
+            for chunk in relevant_chunks
+        ]
+
+        return {
+            "message": answer,
+            "sources": sources,
+            "used_documents": True,
+        }
+
+    answer = generate_general_chat_answer(query)
 
     return {
-        "message": (
-            f"I received your message: \"{request.message}\". "
-            "I'm currently running in local development mode. "
-            "Once the AI provider is connected, I'll be able to "
-            "give you a real AI-generated response."
-        )
+        "message": answer,
+        "sources": [],
+        "used_documents": False,
     }
 @app.post("/documents/extract-text")
 async def extract_text(file: UploadFile = File(...)):
@@ -364,26 +502,32 @@ def generate_answer(
     query: str,
     context: str,
 ):
+    if len(context.strip()) < 300:
+        return (
+            "Based on the uploaded document, the available text says:\\n"
+            f"{context.strip()}\\n\\n"
+            "The available text does not provide further details."
+        )
+
     messages = [
         {
             "role": "system",
             "content": (
-                "You are AROHA, a personal AI assistant. "
-                "Answer the user's question using only the "
-                "provided document context. "
-                "Do not use outside knowledge. "
-                "Do not invent facts. "
-                "If the answer is not in the context, say "
-                "\"I don't have enough information in the "
-                "uploaded documents.\""
+                "You are AROHA's document question-answering engine. "
+                "Answer only using the provided document excerpts. "
+                "Never invent facts or use outside knowledge. "
+                "If the excerpts do not answer the question, state that "
+                "the uploaded documents do not provide enough information. "
+                "Keep answers concise and factual."
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Document context:\n{context}\n\n"
-                f"Question: {query}\n\n"
-                "Give a short, direct answer."
+                f"DOCUMENT EXCERPTS BEGIN\\n{context}\\n"
+                "DOCUMENT EXCERPTS END\\n\\n"
+                f"QUESTION: {query}\\n\\n"
+                "Answer using only explicit facts from the excerpts."
             ),
         },
     ]
@@ -403,13 +547,11 @@ def generate_answer(
 
     output = generation_model.generate(
         **inputs,
-        max_new_tokens=150,
+        max_new_tokens=120,
         do_sample=False,
     )
 
-    generated_tokens = output[
-        0
-    ][inputs.input_ids.shape[1]:]
+    generated_tokens = output[0][inputs.input_ids.shape[1]:]
 
     answer = generation_tokenizer.decode(
         generated_tokens,

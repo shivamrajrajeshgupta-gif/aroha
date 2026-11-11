@@ -371,14 +371,15 @@ useEffect(() => {
     // ----------------------------------------------
 
     const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message: userMessage,
-      }),
-    })
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${session.access_token}`,
+  },
+  body: JSON.stringify({
+    message: userMessage,
+  }),
+})
 
     if (!response.ok) {
       throw new Error(
